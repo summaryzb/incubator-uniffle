@@ -94,7 +94,7 @@ public class GetShuffleReportForMultiPartTest extends SparkIntegrationTestBase {
 
   private static ShuffleServerConf buildShuffleServerConf(ServerType serverType) {
     ShuffleServerConf serverConf = new ShuffleServerConf();
-    serverConf.setInteger("rss.rpc.server.port", IntegrationTestBase.getNextRpcServerPort());
+    serverConf.setInteger("rss.rpc.server.port", 0);
     serverConf.setString("rss.storage.type", StorageType.MEMORY_LOCALFILE_HDFS.name());
     serverConf.setString("rss.storage.basePath", tempDir.getAbsolutePath());
     serverConf.setString("rss.server.buffer.capacity", "671088640");
@@ -112,8 +112,7 @@ public class GetShuffleReportForMultiPartTest extends SparkIntegrationTestBase {
     serverConf.setBoolean("rss.server.health.check.enable", false);
     serverConf.set(ShuffleServerConf.RPC_SERVER_TYPE, serverType);
     if (serverType == ServerType.GRPC_NETTY) {
-      serverConf.setInteger(
-          ShuffleServerConf.NETTY_SERVER_PORT, IntegrationTestBase.getNextNettyServerPort());
+      serverConf.setInteger(ShuffleServerConf.NETTY_SERVER_PORT, 0);
     }
     return serverConf;
   }

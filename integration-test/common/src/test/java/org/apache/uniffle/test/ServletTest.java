@@ -86,15 +86,14 @@ public class ServletTest extends IntegrationTestBase {
 
   @BeforeAll
   public static void setUp(@TempDir File tmpDir) throws Exception {
-    CoordinatorConf coordinatorConf = new CoordinatorConf();
-    coordinatorConf.set(RssBaseConf.JETTY_HTTP_PORT, 12345);
+      reserveJettyPorts(3);
+    CoordinatorConf coordinatorConf = coordinatorConf(jettyPorts.get(0));
     coordinatorConf.set(RssBaseConf.JETTY_CORE_POOL_SIZE, 128);
-    coordinatorConf.set(RssBaseConf.RPC_SERVER_PORT, 12346);
     coordinatorConf.set(RssBaseConf.REST_AUTHORIZATION_CREDENTIALS, AUTHORIZATION_CREDENTIALS);
     createCoordinatorServer(coordinatorConf);
+    String quorum = startCoordinators();
 
-    ShuffleServerConf shuffleServerConf = getShuffleServerConf(ServerType.GRPC);
-    shuffleServerConf.set(RssBaseConf.RSS_COORDINATOR_QUORUM, "127.0.0.1:12346");
+      ShuffleServerConf shuffleServerConf = getShuffleServerConf(ServerType.GRPC, quorum);
     shuffleServerConf.set(ShuffleServerConf.SERVER_DECOMMISSION_SHUTDOWN, false);
     File dataDir1 = new File(tmpDir, "data1");
     File dataDir2 = new File(tmpDir, "data2");
