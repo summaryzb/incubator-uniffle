@@ -114,10 +114,7 @@ public class DataPusher implements Closeable {
                   runnable.run();
                 }
               }
-              return shuffleBlockInfoList.stream()
-                  .map(x -> x.getFreeMemory())
-                  .reduce((a, b) -> a + b)
-                  .get();
+              return 0L;
             },
             executorService)
         .exceptionally(

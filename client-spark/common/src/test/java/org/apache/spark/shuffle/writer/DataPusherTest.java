@@ -22,7 +22,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Supplier;
 
@@ -39,7 +38,6 @@ import org.apache.uniffle.common.ShuffleServerInfo;
 import org.apache.uniffle.common.rpc.StatusCode;
 import org.apache.uniffle.common.util.JavaUtils;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class DataPusherTest {
@@ -119,9 +117,7 @@ public class DataPusherTest {
         new ShuffleBlockInfo(1, 1, 1, 1, 1, new byte[1], null, 1, 100, 1);
     AddBlockEvent event = new AddBlockEvent("taskId", Arrays.asList(shuffleBlockInfo));
     // sync send
-    CompletableFuture<Long> future = dataPusher.send(event);
-    long memoryFree = future.get();
-    assertEquals(100, memoryFree);
+    dataPusher.send(event);
     assertTrue(taskToSuccessBlockIds.get("taskId").contains(1L));
     assertTrue(taskToSuccessBlockIds.get("taskId").contains(2L));
     assertTrue(taskToFailedBlockSendTracker.get("taskId").getFailedBlockIds().contains(3L));

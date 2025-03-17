@@ -25,7 +25,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
@@ -551,38 +550,18 @@ public class WriteBufferManager extends MemoryConsumer {
   @Override
   public long spill(long size, MemoryConsumer trigger) {
     // Only for the MemoryConsumer of this instance, it will flush buffer
-    if (!memorySpillEnabled || trigger != this) {
-      return 0L;
+    if (memorySpillEnabled && trigger == this) {
+      List<CompletableFuture<Long>> futures = spillFunc.apply(clear(bufferSpillRatio));
+      CompletableFuture<Void> allOfFutures =
+          CompletableFuture.allOf(futures.toArray(new CompletableFuture[futures.size()]));
+      try {
+        // A best effort strategy to wait.
+        allOfFutures.get(memorySpillTimeoutSec, TimeUnit.SECONDS);
+      } catch (Exception e) {
+        // ignore
+      }
     }
-
-    List<CompletableFuture<Long>> futures = spillFunc.apply(clear(bufferSpillRatio));
-    CompletableFuture<Void> allOfFutures =
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[futures.size()]));
-    try {
-      allOfFutures.get(memorySpillTimeoutSec, TimeUnit.SECONDS);
-    } catch (TimeoutException timeoutException) {
-      // A best effort strategy to wait.
-      // If timeout exception occurs, the underlying tasks won't be cancelled.
-      LOG.warn("[taskId: {}] Spill tasks timeout after {} seconds", taskId, memorySpillTimeoutSec);
-    } catch (Exception e) {
-      LOG.warn("[taskId: {}] Failed to spill buffers due to ", taskId, e);
-    } finally {
-      long releasedSize =
-          futures.stream()
-              .filter(x -> x.isDone())
-              .mapToLong(
-                  x -> {
-                    try {
-                      return x.get();
-                    } catch (Exception e) {
-                      return 0;
-                    }
-                  })
-              .sum();
-      LOG.info(
-          "[taskId: {}] Spill triggered by own, released memory size: {}", taskId, releasedSize);
-      return releasedSize;
-    }
+    return 0L;
   }
 
   @VisibleForTesting
