@@ -26,12 +26,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -84,6 +81,7 @@ import org.apache.uniffle.common.exception.RssException;
 import org.apache.uniffle.common.exception.RssSendFailedException;
 import org.apache.uniffle.common.exception.RssWaitFailedException;
 import org.apache.uniffle.common.rpc.StatusCode;
+import org.apache.uniffle.common.util.JavaUtils;
 import org.apache.uniffle.storage.util.StorageType;
 
 import static org.apache.spark.shuffle.RssSparkConfig.RSS_CLIENT_MAP_SIDE_COMBINE_ENABLED;
@@ -128,8 +126,7 @@ public class RssShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
   protected final long taskAttemptId;
 
   protected final ShuffleWriteMetrics shuffleWriteMetrics;
-
-  private final BlockingQueue<Object> finishEventQueue = new LinkedBlockingQueue<>();
+  private final Map<Long, Future> inFlightEvent = JavaUtils.newConcurrentMap();
 
   // Will be updated when the reassignment is triggered.
   private TaskAttemptAssignment taskAttemptAssignment;
@@ -415,7 +412,7 @@ public class RssShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
   }
 
   @VisibleForTesting
-  protected List<CompletableFuture<Long>> processShuffleBlockInfos(
+  protected List<Future<Long>> processShuffleBlockInfos(
       List<ShuffleBlockInfo> shuffleBlockInfoList) {
     if (shuffleBlockInfoList != null && !shuffleBlockInfoList.isEmpty()) {
       shuffleBlockInfoList.forEach(
@@ -440,9 +437,8 @@ public class RssShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
     return Collections.emptyList();
   }
 
-  protected List<CompletableFuture<Long>> postBlockEvent(
-      List<ShuffleBlockInfo> shuffleBlockInfoList) {
-    List<CompletableFuture<Long>> futures = new ArrayList<>();
+  protected List<Future<Long>> postBlockEvent(List<ShuffleBlockInfo> shuffleBlockInfoList) {
+    List<Future<Long>> futures = new ArrayList<>();
     for (AddBlockEvent event : bufferManager.buildBlockEvents(shuffleBlockInfoList)) {
       if (blockFailSentRetryEnabled) {
         // do nothing if failed.
@@ -455,13 +451,8 @@ public class RssShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
               });
         }
       }
-      event.addCallback(
-          () -> {
-            boolean ret = finishEventQueue.add(new Object());
-            if (!ret) {
-              LOG.error("Add event " + event + " to finishEventQueue fail");
-            }
-          });
+      event.addCallback(() -> inFlightEvent.remove(event.getEventId()));
+      event.addPrepare(f -> inFlightEvent.put(event.getEventId(), f));
       futures.add(shuffleManager.sendData(event));
     }
     return futures;
@@ -475,29 +466,45 @@ public class RssShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
   @VisibleForTesting
   protected void checkBlockSendResult(Set<Long> blockIds) {
     boolean interrupted = false;
+    boolean hurryUp = false;
 
     try {
       long remainingMs = sendCheckTimeout;
       long end = System.currentTimeMillis() + remainingMs;
 
-      while (true) {
+      while (!interrupted) {
         try {
-          finishEventQueue.clear();
           checkDataIfAnyFailure();
           Set<Long> successBlockIds = shuffleManager.getSuccessBlockIds(taskId);
           blockIds.removeAll(successBlockIds);
           if (blockIds.isEmpty()) {
             break;
           }
-          if (finishEventQueue.isEmpty()) {
-            remainingMs = Math.max(end - System.currentTimeMillis(), 0);
-            Object event = finishEventQueue.poll(remainingMs, TimeUnit.MILLISECONDS);
-            if (event == null) {
-              break;
+          if (!inFlightEvent.isEmpty()) {
+            if (!hurryUp) {
+              Future maybeLast = inFlightEvent.get(bufferManager.getLastEventId());
+              if (maybeLast != null) {
+                maybeLast.get(remainingMs, TimeUnit.MILLISECONDS);
+              }
+              hurryUp = true;
             }
+            remainingMs = end - System.currentTimeMillis();
+            inFlightEvent.values().stream()
+                .filter(f -> !f.isDone())
+                .findAny()
+                .get()
+                .get(remainingMs, TimeUnit.MILLISECONDS);
+          } else {
+            // it seems never reach here, since `blockIds.isEmpty()` will break the loop first
+            break;
           }
         } catch (InterruptedException e) {
+          LOG.warn("Ignore the InterruptedException which should be caused by internal killed");
           interrupted = true;
+          inFlightEvent.values().stream().forEach(f -> f.cancel(true));
+          Thread.currentThread().interrupt();
+        } catch (Exception e) {
+          LOG.error("Exception happened when check block send result", e);
         }
       }
       if (!blockIds.isEmpty()) {
