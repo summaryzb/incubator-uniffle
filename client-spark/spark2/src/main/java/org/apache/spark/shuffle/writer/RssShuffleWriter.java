@@ -360,8 +360,7 @@ public class RssShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
    *
    * @param shuffleBlockInfoList
    */
-  private List<Future<Long>> processShuffleBlockInfos(
-      List<ShuffleBlockInfo> shuffleBlockInfoList) {
+  private List<Future<Long>> processShuffleBlockInfos(List<ShuffleBlockInfo> shuffleBlockInfoList) {
     if (shuffleBlockInfoList != null && !shuffleBlockInfoList.isEmpty()) {
       shuffleBlockInfoList.stream()
           .forEach(
@@ -389,8 +388,7 @@ public class RssShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
 
   // don't send huge block to shuffle server, or there will be OOM if shuffle sever receives data
   // more than expected
-  protected List<Future<Long>> postBlockEvent(
-      List<ShuffleBlockInfo> shuffleBlockInfoList) {
+  protected List<Future<Long>> postBlockEvent(List<ShuffleBlockInfo> shuffleBlockInfoList) {
     List<Future<Long>> futures = new ArrayList<>();
     for (AddBlockEvent event : bufferManager.buildBlockEvents(shuffleBlockInfoList)) {
       futures.add(shuffleManager.sendData(event));

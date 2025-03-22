@@ -26,10 +26,13 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -474,6 +477,7 @@ public class RssShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
 
       while (!interrupted) {
         try {
+          LOG.warn("checkBlockSendResult," + blockIds.size() + "," + inFlightEvent.size());
           checkDataIfAnyFailure();
           Set<Long> successBlockIds = shuffleManager.getSuccessBlockIds(taskId);
           blockIds.removeAll(successBlockIds);
@@ -492,9 +496,10 @@ public class RssShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
             inFlightEvent.values().stream()
                 .filter(f -> !f.isDone())
                 .findAny()
-                .get()
+                .orElseGet(() -> CompletableFuture.completedFuture(0L))
                 .get(remainingMs, TimeUnit.MILLISECONDS);
           } else {
+            LOG.warn("blockSize:" + blockIds.size() + ",inflightEvent:" + inFlightEvent.size());
             // it seems never reach here, since `blockIds.isEmpty()` will break the loop first
             break;
           }
@@ -503,8 +508,9 @@ public class RssShuffleWriter<K, V, C> extends ShuffleWriter<K, V> {
           interrupted = true;
           inFlightEvent.values().stream().forEach(f -> f.cancel(true));
           Thread.currentThread().interrupt();
-        } catch (Exception e) {
-          LOG.error("Exception happened when check block send result", e);
+        } catch (ExecutionException | TimeoutException e) {
+          LOG.error("check err", e);
+          break;
         }
       }
       if (!blockIds.isEmpty()) {

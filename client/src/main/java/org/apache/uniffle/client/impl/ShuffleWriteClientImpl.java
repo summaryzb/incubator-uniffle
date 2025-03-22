@@ -249,6 +249,7 @@ public class ShuffleWriteClientImpl implements ShuffleWriteClient {
                 }
                 return true;
               });
+      dataTransferPool.submit(future);
       futures.add(future);
     }
 

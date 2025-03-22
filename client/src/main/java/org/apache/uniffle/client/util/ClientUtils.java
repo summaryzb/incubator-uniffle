@@ -24,7 +24,11 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.uniffle.client.api.ShuffleWriteClient;
 import org.apache.uniffle.common.ClientType;
@@ -32,6 +36,7 @@ import org.apache.uniffle.common.RemoteStorageInfo;
 import org.apache.uniffle.storage.util.StorageType;
 
 public class ClientUtils {
+  private static final Logger LOG = LoggerFactory.getLogger(ClientUtils.class);
 
   public static RemoteStorageInfo fetchRemoteStorage(
       String appId,
@@ -65,11 +70,12 @@ public class ClientUtils {
       while (iterator.hasNext()) {
         Future<Boolean> future = iterator.next();
         if (future.isDone()) {
-          finished++;
           iterator.remove();
           try {
             if (!future.get()) {
               failed++;
+            } else {
+              finished++;
             }
           } catch (Exception e) {
             // cancel or execution exception
@@ -92,7 +98,10 @@ public class ClientUtils {
         futures.forEach(x -> x.cancel(true));
         Thread.currentThread().interrupt();
         return false;
+      } catch (TimeoutException e) {
+        // ignore
       } catch (Exception e) {
+        LOG.warn("Exception in waitUntilDoneOrFail", e);
         // ignore timeout or execution err
       }
     }
